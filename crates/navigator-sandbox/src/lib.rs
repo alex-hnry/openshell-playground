@@ -11,7 +11,7 @@ mod sandbox;
 use miette::{IntoDiagnostic, Result};
 use std::time::Duration;
 use tokio::time::timeout;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::policy::NetworkMode;
 use crate::policy::SandboxPolicy;
@@ -41,6 +41,9 @@ pub async fn run_sandbox(
 
     // Load policy - either via gRPC or from local file
     let policy = load_policy(policy_path, sandbox_id, navigator_endpoint).await?;
+
+    // Prepare filesystem: create and chown read_write directories
+    prepare_filesystem(&policy)?;
 
     let _proxy = if matches!(policy.network.mode, NetworkMode::Proxy) {
         let proxy_policy = policy.network.proxy.as_ref().ok_or_else(|| {
@@ -111,4 +114,69 @@ async fn load_policy(
          - --sandbox-id and --navigator-endpoint (or NAVIGATOR_SANDBOX_ID and NAVIGATOR_ENDPOINT env vars)\n\
          - --policy (or NAVIGATOR_SANDBOX_POLICY env var)"
     ))
+}
+
+/// Prepare filesystem for the sandboxed process.
+///
+/// Creates `read_write` directories if they don't exist and sets ownership
+/// to the configured sandbox user/group. This runs as the supervisor (root)
+/// before forking the child process.
+#[cfg(unix)]
+fn prepare_filesystem(policy: &SandboxPolicy) -> Result<()> {
+    use nix::unistd::{Group, User, chown};
+
+    let user_name = match policy.process.run_as_user.as_deref() {
+        Some(name) if !name.is_empty() => Some(name),
+        _ => None,
+    };
+    let group_name = match policy.process.run_as_group.as_deref() {
+        Some(name) if !name.is_empty() => Some(name),
+        _ => None,
+    };
+
+    // If no user/group configured, nothing to do
+    if user_name.is_none() && group_name.is_none() {
+        return Ok(());
+    }
+
+    // Resolve user and group
+    let uid = if let Some(name) = user_name {
+        Some(
+            User::from_name(name)
+                .into_diagnostic()?
+                .ok_or_else(|| miette::miette!("Sandbox user not found: {name}"))?
+                .uid,
+        )
+    } else {
+        None
+    };
+
+    let gid = if let Some(name) = group_name {
+        Some(
+            Group::from_name(name)
+                .into_diagnostic()?
+                .ok_or_else(|| miette::miette!("Sandbox group not found: {name}"))?
+                .gid,
+        )
+    } else {
+        None
+    };
+
+    // Create and chown each read_write path
+    for path in &policy.filesystem.read_write {
+        if !path.exists() {
+            debug!(path = %path.display(), "Creating read_write directory");
+            std::fs::create_dir_all(path).into_diagnostic()?;
+        }
+
+        debug!(path = %path.display(), ?uid, ?gid, "Setting ownership on read_write directory");
+        chown(path, uid, gid).into_diagnostic()?;
+    }
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn prepare_filesystem(_policy: &SandboxPolicy) -> Result<()> {
+    Ok(())
 }

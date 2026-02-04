@@ -18,11 +18,18 @@ protoc = "29"
 skaffold = "latest"
 k3d = "latest"
 helm = "latest"
+sccache = "latest"
 
 [env]
-KUBECONFIG = "{{config_root}}/kubeconfig"
 _.path = ["{{config_root}}/scripts/bin"]
+_.python.venv = { path = ".venv", create = true }
+
+KUBECONFIG = "{{config_root}}/kubeconfig"
 UV_CACHE_DIR = "{{config_root}}/.cache/uv"
+
+# Enable sccache for faster Rust builds
+RUSTC_WRAPPER = "sccache"
+SCCACHE_DIR = "{{config_root}}/.cache/sccache"
 
 # ============================================================================
 # Build Tasks
@@ -160,6 +167,34 @@ docker run ${TTY_FLAG} \
 [tasks."helm:lint"]
 description = "Lint the navigator helm chart"
 run = "helm lint helm/navigator"
+
+# ============================================================================
+# Kubernetes Tasks
+# ============================================================================
+
+[tasks."kube:start"]
+description = "Start/create k3d cluster with registry"
+run = "mise -C kube run start"
+
+[tasks."kube:stop"]
+description = "Stop k3d cluster (preserves state)"
+run = "mise -C kube run stop"
+
+[tasks."kube:destroy"]
+description = "Delete k3d cluster completely"
+run = "mise -C kube run destroy"
+
+[tasks."kube:deploy"]
+description = "Build and deploy via skaffold"
+run = "mise -C kube run deploy"
+
+[tasks."kube:deploy-svc"]
+description = "Build images and restart services (no helm/config changes)"
+run = "mise -C kube run deploy-svc"
+
+[tasks."kube:dev"]
+description = "Dev mode with hot reload via skaffold"
+run = "mise -C kube run dev"
 
 # ============================================================================
 # Development Tasks

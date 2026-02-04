@@ -1,0 +1,17 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: {{ .Values.gateway.name }}
+  labels:
+    {{- include "navigator.labels" . | nindent 4 }}
+spec:
+  gatewayClassName: {{ .Values.gateway.className | quote }}
+  listeners:
+    - name: grpc
+      protocol: HTTP
+      port: {{ .Values.gateway.listenerPort }}
+      allowedRoutes:
+        namespaces:
+          from: Same
+{{- end }}

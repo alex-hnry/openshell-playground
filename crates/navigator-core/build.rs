@@ -13,6 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_files = [
         "../../proto/navigator.proto",
         "../../proto/datamodel.proto",
+        "../../proto/sandbox.proto",
         "../../proto/test.proto",
     ];
     let out_dir = PathBuf::from("src/proto");

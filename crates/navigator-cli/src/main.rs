@@ -1,8 +1,7 @@
 //! Navigator CLI - command-line interface for Navigator.
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use miette::Result;
-use owo_colors::OwoColorize;
 
 use navigator_cli::run;
 
@@ -16,15 +15,15 @@ struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     verbose: u8,
 
-    /// Server address to connect to.
+    /// Cluster address to connect to.
     #[arg(
         long,
         short,
         default_value = "http://127.0.0.1:50051",
         global = true,
-        env = "NAVIGATOR_SERVER"
+        env = "NAVIGATOR_CLUSTER"
     )]
-    server: String,
+    cluster: String,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -32,11 +31,63 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Check server health.
-    Health,
+    /// Manage cluster.
+    Cluster {
+        #[command(subcommand)]
+        command: ClusterCommands,
+    },
 
+    /// Manage sandboxes.
+    Sandbox {
+        #[command(subcommand)]
+        command: SandboxCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ClusterCommands {
     /// Show server status and information.
     Status,
+}
+
+#[derive(Subcommand, Debug)]
+enum SandboxCommands {
+    /// Create a sandbox.
+    Create,
+
+    /// Fetch a sandbox by id.
+    Get {
+        /// Sandbox id.
+        id: String,
+    },
+
+    /// List sandboxes.
+    List {
+        /// Maximum number of sandboxes to return.
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+
+        /// Offset into the sandbox list.
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+
+        /// Print only sandbox ids (one per line).
+        #[arg(long)]
+        ids: bool,
+    },
+
+    /// Delete a sandbox by id.
+    Delete {
+        /// Sandbox ids.
+        #[arg(required = true, num_args = 1.., value_name = "ID")]
+        ids: Vec<String>,
+    },
+
+    /// Connect to a sandbox.
+    Connect {
+        /// Sandbox id.
+        id: String,
+    },
 }
 
 #[tokio::main]
@@ -59,20 +110,30 @@ async fn main() -> Result<()> {
         .init();
 
     match cli.command {
-        Some(Commands::Health) => {
-            run::health(&cli.server).await?;
-        }
-        Some(Commands::Status) => {
-            run::status(&cli.server).await?;
-        }
+        Some(Commands::Cluster { command }) => match command {
+            ClusterCommands::Status => {
+                run::cluster_status(&cli.cluster).await?;
+            }
+        },
+        Some(Commands::Sandbox { command }) => match command {
+            SandboxCommands::Create => {
+                run::sandbox_create(&cli.cluster).await?;
+            }
+            SandboxCommands::Get { id } => {
+                run::sandbox_get(&cli.cluster, &id).await?;
+            }
+            SandboxCommands::List { limit, offset, ids } => {
+                run::sandbox_list(&cli.cluster, limit, offset, ids).await?;
+            }
+            SandboxCommands::Delete { ids } => {
+                run::sandbox_delete(&cli.cluster, &ids).await?;
+            }
+            SandboxCommands::Connect { id } => {
+                run::sandbox_connect(&cli.cluster, &id).await?;
+            }
+        },
         None => {
-            println!(
-                "{} {}",
-                "Navigator".bold().cyan(),
-                env!("CARGO_PKG_VERSION").dimmed()
-            );
-            println!();
-            println!("Run {} for usage information.", "--help".green());
+            Cli::command().print_help().expect("Failed to print help");
         }
     }
 

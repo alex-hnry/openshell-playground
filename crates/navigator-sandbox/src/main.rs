@@ -14,7 +14,9 @@ use navigator_sandbox::run_sandbox;
 #[command(about = "Process sandbox and monitor", long_about = None)]
 struct Args {
     /// Command to execute in the sandbox.
-    #[arg(trailing_var_arg = true, required = true)]
+    /// Can also be provided via `NAVIGATOR_SANDBOX_COMMAND` environment variable.
+    /// Defaults to `/bin/bash` if neither is provided.
+    #[arg(trailing_var_arg = true)]
     command: Vec<String>,
 
     /// Working directory for the sandboxed process.
@@ -30,8 +32,19 @@ struct Args {
     interactive: bool,
 
     /// Path to YAML policy file for sandbox configuration.
-    #[arg(long, env = "NAVIGATOR_SANDBOX_POLICY", required = true)]
+    /// Mutually exclusive with --sandbox-id (gRPC mode).
+    #[arg(long, env = "NAVIGATOR_SANDBOX_POLICY")]
     policy: Option<String>,
+
+    /// Sandbox ID for fetching policy via gRPC from Navigator server.
+    /// Requires --navigator-endpoint to be set.
+    #[arg(long, env = "NAVIGATOR_SANDBOX_ID")]
+    sandbox_id: Option<String>,
+
+    /// Navigator server gRPC endpoint for fetching policy.
+    /// Required when using --sandbox-id.
+    #[arg(long, env = "NAVIGATOR_ENDPOINT")]
+    navigator_endpoint: Option<String>,
 
     /// Log level (trace, debug, info, warn, error).
     #[arg(long, default_value = "warn", env = "NAVIGATOR_LOG_LEVEL")]
@@ -75,14 +88,26 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    info!(command = ?args.command, "Starting sandbox");
+    // Get command - either from CLI args, environment variable, or default to /bin/bash
+    let command = if !args.command.is_empty() {
+        args.command
+    } else if let Ok(c) = std::env::var("NAVIGATOR_SANDBOX_COMMAND") {
+        // Simple shell-like splitting on whitespace
+        c.split_whitespace().map(String::from).collect()
+    } else {
+        vec!["/bin/bash".to_string()]
+    };
+
+    info!(command = ?command, "Starting sandbox");
 
     let exit_code = run_sandbox(
-        args.command,
+        command,
         args.workdir,
         args.timeout,
         args.interactive,
         args.policy,
+        args.sandbox_id,
+        args.navigator_endpoint,
         args.health_check,
         args.health_port,
     )

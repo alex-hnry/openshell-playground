@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package navigator.sandbox.v1;
+
+// Sandbox security policy configuration.
+message SandboxPolicy {
+  // Policy version.
+  uint32 version = 1;
+  // Filesystem access policy.
+  FilesystemPolicy filesystem = 2;
+  // Network access policy.
+  NetworkPolicy network = 3;
+  // Landlock configuration.
+  LandlockPolicy landlock = 4;
+  // Process execution policy.
+  ProcessPolicy process = 5;
+}
+
+// Filesystem access policy.
+message FilesystemPolicy {
+  // Read-only directory allow list.
+  repeated string read_only = 1;
+  // Read-write directory allow list.
+  repeated string read_write = 2;
+  // Automatically include the workdir as read-write.
+  bool include_workdir = 3;
+}
+
+// Network access policy.
+message NetworkPolicy {
+  // Network access mode.
+  NetworkMode mode = 1;
+  // Proxy configuration (required when mode is PROXY).
+  ProxyPolicy proxy = 2;
+}
+
+// Network access mode.
+enum NetworkMode {
+  // Unspecified defaults to BLOCK.
+  NETWORK_MODE_UNSPECIFIED = 0;
+  // Block all network access.
+  NETWORK_MODE_BLOCK = 1;
+  // Route traffic through a proxy.
+  NETWORK_MODE_PROXY = 2;
+  // Allow all network access.
+  NETWORK_MODE_ALLOW = 3;
+}
+
+// Proxy configuration for network policy.
+message ProxyPolicy {
+  // Unix socket path for a local proxy (preferred for strict seccomp rules).
+  string unix_socket = 1;
+  // TCP address for a local HTTP proxy (loopback-only).
+  string http_addr = 2;
+  // Allowed hostnames for proxy traffic. Empty means allow all.
+  repeated string allow_hosts = 3;
+}
+
+// Landlock policy configuration.
+message LandlockPolicy {
+  // Compatibility mode.
+  LandlockCompatibility compatibility = 1;
+}
+
+// Landlock compatibility mode.
+enum LandlockCompatibility {
+  // Unspecified defaults to BEST_EFFORT.
+  LANDLOCK_COMPATIBILITY_UNSPECIFIED = 0;
+  // Use best effort - degrade gracefully on older kernels.
+  LANDLOCK_COMPATIBILITY_BEST_EFFORT = 1;
+  // Require full Landlock support or fail.
+  LANDLOCK_COMPATIBILITY_HARD_REQUIREMENT = 2;
+}
+
+// Process execution policy.
+message ProcessPolicy {
+  // User name to run the sandboxed process as.
+  string run_as_user = 1;
+  // Group name to run the sandboxed process as.
+  string run_as_group = 2;
+}
+
+// Request to get sandbox policy by sandbox ID.
+message GetSandboxPolicyRequest {
+  // The sandbox ID.
+  string sandbox_id = 1;
+}
+
+// Response containing sandbox policy.
+message GetSandboxPolicyResponse {
+  // The sandbox policy configuration.
+  SandboxPolicy policy = 1;
+}

@@ -2,6 +2,9 @@ syntax = "proto3";
 
 package navigator.v1;
 
+import "datamodel.proto";
+import "sandbox.proto";
+
 option java_multiple_files = true;
 option java_package = "com.anthropic.navigator.v1";
 
@@ -9,6 +12,30 @@ option java_package = "com.anthropic.navigator.v1";
 service Navigator {
   // Check the health of the service.
   rpc Health(HealthRequest) returns (HealthResponse);
+
+  // Create a new sandbox.
+  rpc CreateSandbox(CreateSandboxRequest) returns (SandboxResponse);
+
+  // Fetch a sandbox by id.
+  rpc GetSandbox(GetSandboxRequest) returns (SandboxResponse);
+
+  // List sandboxes.
+  rpc ListSandboxes(ListSandboxesRequest) returns (ListSandboxesResponse);
+
+  // Delete a sandbox by id.
+  rpc DeleteSandbox(DeleteSandboxRequest) returns (DeleteSandboxResponse);
+
+  // Get sandbox policy by id (called by sandbox entrypoint at startup).
+  rpc GetSandboxPolicy(navigator.sandbox.v1.GetSandboxPolicyRequest)
+      returns (navigator.sandbox.v1.GetSandboxPolicyResponse);
+
+  // Watch a sandbox and stream updates.
+  //
+  // This stream can include:
+  // - Sandbox status snapshots (phase/status)
+  // - Navigator server process logs correlated by sandbox_id
+  // - Platform events correlated to the sandbox
+  rpc WatchSandbox(WatchSandboxRequest) returns (stream SandboxStreamEvent);
 }
 
 // Health check request.
@@ -21,9 +48,109 @@ message HealthResponse {
 
   // Service version.
   string version = 2;
+}
 
-  // Uptime in seconds.
-  uint64 uptime_seconds = 3;
+// Create sandbox request.
+message CreateSandboxRequest {
+  navigator.datamodel.v1.SandboxSpec spec = 1;
+}
+
+// Get sandbox request.
+message GetSandboxRequest {
+  string id = 1;
+}
+
+// List sandboxes request.
+message ListSandboxesRequest {
+  uint32 limit = 1;
+  uint32 offset = 2;
+}
+
+// Delete sandbox request.
+message DeleteSandboxRequest {
+  string id = 1;
+}
+
+// Sandbox response.
+message SandboxResponse {
+  navigator.datamodel.v1.Sandbox sandbox = 1;
+}
+
+// List sandboxes response.
+message ListSandboxesResponse {
+  repeated navigator.datamodel.v1.Sandbox sandboxes = 1;
+}
+
+// Delete sandbox response.
+message DeleteSandboxResponse {
+  bool deleted = 1;
+}
+
+// Watch sandbox request.
+message WatchSandboxRequest {
+  // Sandbox id.
+  string id = 1;
+
+  // Stream sandbox status snapshots.
+  bool follow_status = 2;
+
+  // Stream navigator-server process logs correlated to this sandbox.
+  bool follow_logs = 3;
+
+  // Stream platform events correlated to this sandbox.
+  bool follow_events = 4;
+
+  // Replay the last N log lines (best-effort) before following.
+  uint32 log_tail_lines = 5;
+
+  // Replay the last N platform events (best-effort) before following.
+  uint32 event_tail = 6;
+
+  // Stop streaming once the sandbox reaches a terminal phase (READY or ERROR).
+  bool stop_on_terminal = 7;
+}
+
+// One event in a sandbox watch stream.
+message SandboxStreamEvent {
+  oneof payload {
+    // Latest sandbox snapshot.
+    navigator.datamodel.v1.Sandbox sandbox = 1;
+    // One server log line/event.
+    SandboxLogLine log = 2;
+    // One platform event.
+    PlatformEvent event = 3;
+    // Warning from the server (e.g. missed messages due to lag).
+    SandboxStreamWarning warning = 4;
+  }
+}
+
+// Navigator server process log line correlated to a sandbox.
+message SandboxLogLine {
+  string sandbox_id = 1;
+  int64 timestamp_ms = 2;
+  string level = 3;
+  string target = 4;
+  string message = 5;
+}
+
+// Platform event correlated to a sandbox.
+message PlatformEvent {
+  // Event timestamp in milliseconds since epoch.
+  int64 timestamp_ms = 1;
+  // Event source (e.g. "kubernetes", "docker", "process").
+  string source = 2;
+  // Event type/severity (e.g. "Normal", "Warning").
+  string type = 3;
+  // Short reason code (e.g. "Started", "Pulled", "Failed").
+  string reason = 4;
+  // Human-readable event message.
+  string message = 5;
+  // Optional metadata as key-value pairs.
+  map<string, string> metadata = 6;
+}
+
+message SandboxStreamWarning {
+  string message = 1;
 }
 
 // Service status enum.

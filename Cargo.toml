@@ -38,6 +38,8 @@ rustls-pemfile = "2"
 clap = { version = "4.5", features = ["derive", "env"] }
 indicatif = "0.17"
 owo-colors = "4"
+ratatui = "0.26"
+crossterm = "0.28"
 
 # Error handling
 miette = { version = "7", features = ["fancy"] }
@@ -67,6 +69,14 @@ protobuf-src = "1.1.0"
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "sqlite", "migrate"] }
 
+# Kubernetes
+kube = { version = "0.90", features = ["runtime", "derive"] }
+kube-runtime = "0.90"
+k8s-openapi = { version = "0.21.1", features = ["v1_26"] }
+
+# IDs
+uuid = { version = "1.10", features = ["v4"] }
+
 [workspace.lints.rust]
 unsafe_code = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }
@@ -85,6 +95,16 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+
+# Allow noisy nursery lints
+significant_drop_tightening = "allow"  # Often gives incorrect suggestions
+missing_const_for_fn = "allow"  # Too noisy for async code patterns
+
+# Allow noisy pedantic lints
+too_many_lines = "allow"  # Function length limits are subjective
+needless_pass_by_value = "allow"  # Common pattern in async handlers
+ref_option = "allow"  # Common pattern for optional references
+missing_fields_in_debug = "allow"  # Manual Debug impls often intentionally omit fields
 
 [profile.release]
 lto = "thin"

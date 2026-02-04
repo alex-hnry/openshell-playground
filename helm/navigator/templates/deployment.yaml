@@ -28,6 +28,19 @@ spec:
       serviceAccountName: {{ include "navigator.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: init-db
+          image: {{ .Values.server.initImage | quote }}
+          command:
+            - sh
+            - -c
+            - "mkdir -p /var/navigator && chmod 0770 /var/navigator"
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          volumeMounts:
+            - name: navigator-data
+              mountPath: /var/navigator
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -39,6 +52,18 @@ spec:
             - "0.0.0.0:50051"
             - --log-level
             - {{ .Values.server.logLevel }}
+            - --db-url
+            - {{ .Values.server.dbUrl | quote }}
+          env:
+            - name: NAVIGATOR_SANDBOX_NAMESPACE
+              value: {{ .Values.server.sandboxNamespace | quote }}
+            - name: NAVIGATOR_SANDBOX_IMAGE
+              value: {{ .Values.server.sandboxImage | quote }}
+            - name: NAVIGATOR_GRPC_ENDPOINT
+              value: {{ .Values.server.grpcEndpoint | quote }}
+          volumeMounts:
+            - name: navigator-data
+              mountPath: /var/navigator
           ports:
             - name: grpc
               containerPort: 50051
@@ -69,3 +94,6 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      volumes:
+        - name: navigator-data
+          emptyDir: {}

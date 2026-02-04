@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use navigator_server::run_server;
+use navigator_server::{run_server, tracing_bus::TracingLogBus};
 
 /// Navigator Server - gRPC and HTTP server with protocol multiplexing.
 #[derive(Parser, Debug)]
@@ -33,18 +33,34 @@ struct Args {
     /// Database URL for persistence.
     #[arg(long, env = "NAVIGATOR_DB_URL", required = true)]
     db_url: String,
+
+    /// Kubernetes namespace for sandboxes.
+    #[arg(long, env = "NAVIGATOR_SANDBOX_NAMESPACE", default_value = "default")]
+    sandbox_namespace: String,
+
+    /// Default container image for sandboxes.
+    #[arg(long, env = "NAVIGATOR_SANDBOX_IMAGE")]
+    sandbox_image: Option<String>,
+
+    /// gRPC endpoint for sandboxes to callback to Navigator.
+    /// This should be reachable from within the Kubernetes cluster.
+    #[arg(long, env = "NAVIGATOR_GRPC_ENDPOINT")]
+    grpc_endpoint: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .map_err(|e| miette::miette!("failed to install rustls crypto provider: {e:?}"))?;
+
     let args = Args::parse();
 
     // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&args.log_level)),
-        )
-        .init();
+    let tracing_log_bus = TracingLogBus::new();
+    tracing_log_bus.install_subscriber(
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&args.log_level)),
+    );
 
     // Build configuration
     let mut config = navigator_core::Config::default()
@@ -55,9 +71,19 @@ async fn main() -> Result<()> {
         config = config.with_tls(cert, key);
     }
 
-    config = config.with_database_url(args.db_url);
+    config = config
+        .with_database_url(args.db_url)
+        .with_sandbox_namespace(args.sandbox_namespace);
+
+    if let Some(image) = args.sandbox_image {
+        config = config.with_sandbox_image(image);
+    }
+
+    if let Some(endpoint) = args.grpc_endpoint {
+        config = config.with_grpc_endpoint(endpoint);
+    }
 
     info!(bind = %config.bind_address, "Starting Navigator server");
 
-    run_server(config).await.into_diagnostic()
+    run_server(config, tracing_log_bus).await.into_diagnostic()
 }

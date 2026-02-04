@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # Navigator Server Docker image
 # Multi-stage build for smaller final image
 
@@ -13,10 +14,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
+
+# Copy dependency manifests first for better caching
 COPY Cargo.toml Cargo.lock ./
-COPY crates/ crates/
+COPY crates/navigator-cli/Cargo.toml crates/navigator-cli/Cargo.toml
+COPY crates/navigator-core/Cargo.toml crates/navigator-core/Cargo.toml
+COPY crates/navigator-sandbox/Cargo.toml crates/navigator-sandbox/Cargo.toml
+COPY crates/navigator-server/Cargo.toml crates/navigator-server/Cargo.toml
+
+# Create dummy source files to build dependencies
+RUN mkdir -p crates/navigator-cli/src crates/navigator-core/src crates/navigator-sandbox/src crates/navigator-server/src && \
+    echo "fn main() {}" > crates/navigator-cli/src/main.rs && \
+    echo "fn main() {}" > crates/navigator-sandbox/src/main.rs && \
+    echo "fn main() {}" > crates/navigator-server/src/main.rs && \
+    touch crates/navigator-core/src/lib.rs
+
+# Copy proto files needed for build
 COPY proto/ proto/
-RUN cargo build --release --package navigator-server
+
+# Build dependencies only (cached unless Cargo.toml/lock changes)
+RUN cargo build --release --package navigator-server 2>/dev/null || true
+
+# Copy actual source code
+COPY crates/ crates/
+
+# Touch source files to ensure they're rebuilt (not the cached dummy)
+RUN touch crates/navigator-server/src/main.rs
+
+# Build the actual application
+RUN cargo build --release --package navigator-server && \
+    cp /build/target/release/navigator-server /build/navigator-server
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim AS runtime
@@ -32,7 +59,11 @@ RUN useradd --create-home --user-group navigator
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /build/target/release/navigator-server /usr/local/bin/
+COPY --from=builder /build/navigator-server /usr/local/bin/
+
+# Copy migrations to the build-time manifest directory expected by sqlx
+RUN mkdir -p /build/crates/navigator-server
+COPY crates/navigator-server/migrations /build/crates/navigator-server/migrations
 
 # Switch to non-root user
 USER navigator

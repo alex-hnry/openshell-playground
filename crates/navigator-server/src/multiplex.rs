@@ -42,7 +42,7 @@ impl MultiplexService {
         stream: TcpStream,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let grpc_service = NavigatorServer::new(NavigatorService::new(self.state.clone()));
-        let http_service = health_router(self.state.clone());
+        let http_service = health_router();
 
         let service = MultiplexedService {
             grpc: grpc_service,

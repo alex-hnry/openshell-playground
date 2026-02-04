@@ -3,7 +3,7 @@
 replicaCount: 1
 
 image:
-  repository: navigator-registry:5000/navigator-server
+  repository: registry.localhost:5000/navigator-server
   pullPolicy: IfNotPresent
   tag: ""
 
@@ -19,7 +19,8 @@ serviceAccount:
 podAnnotations: {}
 podLabels: {}
 
-podSecurityContext: {}
+podSecurityContext:
+  fsGroup: 1000
 
 securityContext:
   runAsNonRoot: true
@@ -30,8 +31,9 @@ securityContext:
       - ALL
 
 service:
-  type: ClusterIP
+  type: NodePort
   port: 50051
+  nodePort: 30051
 
 resources: {}
 
@@ -44,3 +46,15 @@ affinity: {}
 # Server configuration
 server:
   logLevel: info
+  sandboxNamespace: navigator
+  dbUrl: "sqlite::memory:?cache=shared"
+  initImage: "busybox:1.36"
+  sandboxImage: "registry.localhost:5000/navigator-factory:latest"
+  # gRPC endpoint for sandboxes to callback to Navigator (must be reachable from pods)
+  grpcEndpoint: "http://navigator.navigator.svc.cluster.local:50051"
+
+gateway:
+  enabled: true
+  name: navigator-gateway
+  className: envoy-gateway
+  listenerPort: 50051

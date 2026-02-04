@@ -13,6 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 navigator-core = { path = "../navigator-core" }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
@@ -29,6 +31,9 @@ owo-colors = { workspace = true }
 miette = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
+
+# Streams
+futures = { workspace = true }
 
 # Logging
 tracing = { workspace = true }

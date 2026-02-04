@@ -10,11 +10,14 @@ mod grpc;
 mod http;
 mod multiplex;
 mod persistence;
+mod sandbox;
+mod sandbox_index;
+mod sandbox_watch;
 mod tls;
+pub mod tracing_bus;
 
 use navigator_core::{Config, Error, Result};
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
@@ -22,36 +25,53 @@ pub use grpc::NavigatorService;
 pub use http::health_router;
 pub use multiplex::MultiplexService;
 use persistence::Store;
+use sandbox::{SandboxClient, spawn_sandbox_watcher};
+use sandbox_index::SandboxIndex;
+use sandbox_watch::{SandboxWatchBus, spawn_kube_event_tailer};
 pub use tls::TlsAcceptor;
+use tracing_bus::TracingLogBus;
 
 /// Server state shared across handlers.
 #[derive(Debug)]
 pub struct ServerState {
-    /// Server start time for uptime calculation.
-    pub start_time: Instant,
-
     /// Server configuration.
     pub config: Config,
 
     /// Persistence store.
     pub store: Arc<Store>,
+
+    /// Kubernetes sandbox client.
+    pub sandbox_client: SandboxClient,
+
+    /// In-memory sandbox correlation index.
+    pub sandbox_index: SandboxIndex,
+
+    /// In-memory bus for sandbox update notifications.
+    pub sandbox_watch_bus: SandboxWatchBus,
+
+    /// In-memory bus for server process logs.
+    pub tracing_log_bus: TracingLogBus,
 }
 
 impl ServerState {
     /// Create new server state.
     #[must_use]
-    pub fn new(config: Config, store: Arc<Store>) -> Self {
+    pub fn new(
+        config: Config,
+        store: Arc<Store>,
+        sandbox_client: SandboxClient,
+        sandbox_index: SandboxIndex,
+        sandbox_watch_bus: SandboxWatchBus,
+        tracing_log_bus: TracingLogBus,
+    ) -> Self {
         Self {
-            start_time: Instant::now(),
             config,
             store,
+            sandbox_client,
+            sandbox_index,
+            sandbox_watch_bus,
+            tracing_log_bus,
         }
-    }
-
-    /// Get server uptime in seconds.
-    #[must_use]
-    pub fn uptime_seconds(&self) -> u64 {
-        self.start_time.elapsed().as_secs()
     }
 }
 
@@ -62,14 +82,40 @@ impl ServerState {
 /// # Errors
 ///
 /// Returns an error if the server fails to start or encounters a fatal error.
-pub async fn run_server(config: Config) -> Result<()> {
+pub async fn run_server(config: Config, tracing_log_bus: TracingLogBus) -> Result<()> {
     let database_url = config.database_url.trim();
     if database_url.is_empty() {
         return Err(Error::config("database_url is required"));
     }
 
     let store = Store::connect(database_url).await?;
-    let state = Arc::new(ServerState::new(config.clone(), Arc::new(store)));
+    let sandbox_client = SandboxClient::new(
+        config.sandbox_namespace.clone(),
+        config.sandbox_image.clone(),
+        config.grpc_endpoint.clone(),
+    )
+    .await
+    .map_err(|e| Error::execution(format!("failed to create kubernetes client: {e}")))?;
+    let store = Arc::new(store);
+
+    let sandbox_index = SandboxIndex::new();
+    let sandbox_watch_bus = SandboxWatchBus::new();
+    let state = Arc::new(ServerState::new(
+        config.clone(),
+        store.clone(),
+        sandbox_client,
+        sandbox_index,
+        sandbox_watch_bus,
+        tracing_log_bus,
+    ));
+
+    spawn_sandbox_watcher(
+        store.clone(),
+        state.sandbox_client.clone(),
+        state.sandbox_index.clone(),
+        state.sandbox_watch_bus.clone(),
+    );
+    spawn_kube_event_tailer(state.clone());
 
     // Create the multiplexed service
     let service = MultiplexService::new(state.clone());

@@ -11,5 +11,9 @@ spec:
       targetPort: grpc
       protocol: TCP
       name: grpc
+      appProtocol: grpc
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
   selector:
     {{- include "navigator.selectorLabels" . | nindent 4 }}

@@ -8,11 +8,20 @@ entry point and spawns a child process, applying restrictions before `exec`.
 
 - `crates/navigator-sandbox`: CLI + library that loads policy, spawns the child process, and applies sandbox rules.
 - `crates/navigator-core`: shared types and utilities (policy schema, errors, config).
+- `crates/navigator-server`: Server that stores sandbox policies and serves them via gRPC.
 
 ## Policy Model
 
-Sandboxing is driven by a required YAML policy file. Provide it via `--policy` or
-`NAVIGATOR_SANDBOX_POLICY`. The policy schema includes:
+Sandboxing is driven by a required policy configuration. There are two ways to provide it:
+
+1. **gRPC mode** (production): Set `NAVIGATOR_SANDBOX_ID` and `NAVIGATOR_ENDPOINT` environment
+   variables. The sandbox will fetch its policy from the Navigator server at startup via the
+   `GetSandboxPolicy` RPC.
+
+2. **File mode** (local development): Provide a YAML policy file via `--policy` or
+   `NAVIGATOR_SANDBOX_POLICY`.
+
+The policy schema includes:
 
 - `filesystem`: read-only and read-write allow lists, plus optional inclusion of the workdir.
 - `network`: mode (`allow`, `block`, `proxy`) and optional proxy configuration.
@@ -20,6 +29,33 @@ Sandboxing is driven by a required YAML policy file. Provide it via `--policy` o
 - `process`: optional `run_as_user`/`run_as_group` to drop privileges for the child process.
 
 See `docs/sandbox-policy.yaml` for an example policy.
+
+## Dynamic Policy Loading (gRPC Mode)
+
+When running in Kubernetes, the sandbox fetches its policy dynamically from the Navigator server
+via gRPC instead of reading from a local file. This is the preferred mode for production deployments.
+
+### Environment Variables
+
+The pod template automatically injects these environment variables:
+
+- `NAVIGATOR_SANDBOX_ID`: The sandbox entity ID in Navigator's store
+- `NAVIGATOR_ENDPOINT`: gRPC endpoint for the Navigator server (e.g., `http://navigator:50051`)
+- `NAVIGATOR_SANDBOX_COMMAND`: The command to execute inside the sandbox (user-provided, defaults to `/bin/bash` if not set)
+
+### Startup Flow
+
+1. Pod starts with `navigator-sandbox` entrypoint
+2. Sandbox binary reads `NAVIGATOR_SANDBOX_ID` and `NAVIGATOR_ENDPOINT` from environment
+3. Calls `GetSandboxPolicy(sandbox_id)` gRPC to fetch policy from Navigator server
+4. Applies sandbox restrictions (Landlock, seccomp, privilege drop)
+5. Executes the command from `NAVIGATOR_SANDBOX_COMMAND`, CLI args, or `/bin/bash` by default
+
+### Policy Storage
+
+The sandbox policy is stored as part of the `SandboxSpec` protobuf message in Navigator's persistence
+layer. The policy is required when creating a sandbox via the `CreateSandbox` gRPC call. The policy
+definition lives in `proto/sandbox.proto`.
 
 ## Linux Enforcement (Landlock + Seccomp)
 

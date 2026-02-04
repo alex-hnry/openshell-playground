@@ -2,6 +2,7 @@
 //!
 //! This crate provides process sandboxing and monitoring capabilities.
 
+mod grpc_client;
 mod policy;
 mod process;
 mod proxy;
@@ -22,12 +23,15 @@ pub use process::{ProcessHandle, ProcessStatus};
 /// # Errors
 ///
 /// Returns an error if the command fails to start or encounters a fatal error.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_sandbox(
     command: Vec<String>,
     workdir: Option<String>,
     timeout_secs: u64,
     interactive: bool,
     policy_path: Option<String>,
+    sandbox_id: Option<String>,
+    navigator_endpoint: Option<String>,
     _health_check: bool,
     _health_port: u16,
 ) -> Result<i32> {
@@ -35,12 +39,8 @@ pub async fn run_sandbox(
         .split_first()
         .ok_or_else(|| miette::miette!("No command specified"))?;
 
-    let policy_path = policy_path.or_else(|| std::env::var("NAVIGATOR_SANDBOX_POLICY").ok());
-    let policy_path = policy_path.ok_or_else(|| {
-        miette::miette!("Sandbox policy is required. Provide --policy or NAVIGATOR_SANDBOX_POLICY")
-    })?;
-    info!(policy_path = policy_path, "Loading sandbox policy");
-    let policy = SandboxPolicy::from_path(std::path::Path::new(&policy_path))?;
+    // Load policy - either via gRPC or from local file
+    let policy = load_policy(policy_path, sandbox_id, navigator_endpoint).await?;
 
     let _proxy = if matches!(policy.network.mode, NetworkMode::Proxy) {
         let proxy_policy = policy.network.proxy.as_ref().ok_or_else(|| {
@@ -73,4 +73,42 @@ pub async fn run_sandbox(
     info!(exit_code = status.code(), "Process exited");
 
     Ok(status.code())
+}
+
+/// Load sandbox policy from either gRPC or local file.
+///
+/// Priority:
+/// 1. If `sandbox_id` and `navigator_endpoint` are provided, fetch via gRPC
+/// 2. If `policy_path` is provided (or `NAVIGATOR_SANDBOX_POLICY` env var), load from file
+/// 3. Otherwise, return an error
+async fn load_policy(
+    policy_path: Option<String>,
+    sandbox_id: Option<String>,
+    navigator_endpoint: Option<String>,
+) -> Result<SandboxPolicy> {
+    // Try gRPC mode first if both sandbox_id and endpoint are provided
+    if let (Some(id), Some(endpoint)) = (&sandbox_id, &navigator_endpoint) {
+        info!(
+            sandbox_id = %id,
+            endpoint = %endpoint,
+            "Fetching sandbox policy via gRPC"
+        );
+        let proto_policy = grpc_client::fetch_policy(endpoint, id).await?;
+        return SandboxPolicy::try_from(proto_policy);
+    }
+
+    // Fall back to file-based policy loading
+    let policy_path = policy_path.or_else(|| std::env::var("NAVIGATOR_SANDBOX_POLICY").ok());
+
+    if let Some(path) = policy_path {
+        info!(policy_path = %path, "Loading sandbox policy from file");
+        return SandboxPolicy::from_path(std::path::Path::new(&path));
+    }
+
+    // No policy source available
+    Err(miette::miette!(
+        "Sandbox policy required. Provide one of:\n\
+         - --sandbox-id and --navigator-endpoint (or NAVIGATOR_SANDBOX_ID and NAVIGATOR_ENDPOINT env vars)\n\
+         - --policy (or NAVIGATOR_SANDBOX_POLICY env var)"
+    ))
 }

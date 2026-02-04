@@ -17,6 +17,9 @@ navigator-core = { path = "../navigator-core" }
 # Async runtime
 tokio = { workspace = true }
 
+# gRPC
+tonic = { workspace = true }
+
 # CLI
 clap = { workspace = true }
 

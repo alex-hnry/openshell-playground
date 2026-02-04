@@ -28,7 +28,9 @@ dev = [
 
 [tool.uv]
 # Don't try to install the root package with uv sync - use uv pip install . instead
-# This is needed because maturin bin packages don't work well with editable installs
+# This is needed because maturin bin packages don't install the binary with editable installs
+# (both `uv pip install -e .` and `maturin develop` skip binary installation)
+# Use `uv pip install .` (without -e) to install the navigator CLI binary
 package = false
 
 [tool.maturin]

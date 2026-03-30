@@ -164,6 +164,12 @@ pub fn try_parse_http_request(buf: &[u8]) -> ParseResult {
         }
     }
 
+    if is_chunked && has_content_length {
+        return ParseResult::Invalid(
+            "Request contains both Transfer-Encoding and Content-Length headers".to_string(),
+        );
+    }
+
     let (body, consumed) = if is_chunked {
         let Some((decoded_body, consumed)) = parse_chunked_body(buf, body_start) else {
             return ParseResult::Incomplete;
@@ -570,6 +576,24 @@ mod tests {
         assert_eq!(parsed.body.len(), 100);
     }
 
+    /// SEC: Transfer-Encoding substring match must not match partial tokens.
+    #[test]
+    fn te_substring_not_chunked() {
+        let body = r#"{"model":"m","messages":[]}"#;
+        let request = format!(
+            "POST /v1/chat/completions HTTP/1.1\r\n\
+             Host: x\r\n\
+             Transfer-Encoding: chunkedx\r\n\
+             Content-Length: {}\r\n\
+             \r\n{body}",
+            body.len(),
+        );
+        let ParseResult::Complete(parsed, _) = try_parse_http_request(request.as_bytes()) else {
+            panic!("expected Complete for non-matching TE with valid CL");
+        };
+        assert_eq!(parsed.body.len(), body.len());
+    }
+
     // ---- SEC: Content-Length validation ----
 
     #[test]
@@ -607,5 +631,38 @@ mod tests {
             try_parse_http_request(request),
             ParseResult::Invalid(_)
         ));
+    }
+
+    // ---- SEC-009: CL/TE desynchronisation ----
+
+    /// Reject requests with both Content-Length and Transfer-Encoding to
+    /// prevent CL/TE request smuggling (RFC 7230 Section 3.3.3).
+    #[test]
+    fn reject_dual_content_length_and_transfer_encoding() {
+        let request = b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n";
+        assert!(
+            matches!(
+                try_parse_http_request(request),
+                ParseResult::Invalid(reason)
+                    if reason.contains("Transfer-Encoding")
+                        && reason.contains("Content-Length")
+            ),
+            "Must reject request with both CL and TE"
+        );
+    }
+
+    /// Same rejection regardless of header order.
+    #[test]
+    fn reject_dual_transfer_encoding_and_content_length() {
+        let request = b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\n";
+        assert!(
+            matches!(
+                try_parse_http_request(request),
+                ParseResult::Invalid(reason)
+                    if reason.contains("Transfer-Encoding")
+                        && reason.contains("Content-Length")
+            ),
+            "Must reject request with both TE and CL"
+        );
     }
 }
